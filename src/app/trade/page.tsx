@@ -9,16 +9,19 @@ import LINKImage from "@/img/LINK.svg";
 import USDCImage from "@/img/USDC.svg";
 import Image from "next/image";
 import { portfolioContract } from "@/hooks/portfolioContract";
+import { tradeContract } from "@/hooks/tradeContract";
 import useSWR from "swr";
 export default function RewardsPage() {
     const { address } = useAccountAddress();
     const [activeAction, setActiveAction] = useState<"invest" | "redeem">("invest");
     const [tokenOpen, setTokenOpen] = useState(false);
-    const [token, setToken] = useState("LBTC");
+    type TokenName = "LBTC" | "LETH" | "LINK" | "USDC";
+    const [token, setToken] = useState<TokenName>("LBTC");
     const [img, setImage] = useState(LBTCImage);
     const [del, setDel] = useState("Wrapped Bitcoin");
     const [amount, setAmount] = useState("");
     const { getEtfName, getSepoliaEthBalance, getLeapETFBalance, getERC20Balance } = portfolioContract();
+    const { getQuoteInvestWithToken, getQuoteRedeemToToken } = tradeContract();
 
     const { data: LBTCBalance, error: LBTCBalanceError } = useSWR(
         address ? ["LBTC-balance", address] : null,
@@ -40,7 +43,40 @@ export default function RewardsPage() {
         ([, targetAddress]) => getERC20Balance("USDC", targetAddress)
     );
 
+    const { data: ETFBalance, error: ETFBalanceError } = useSWR(
+        address ? ["ETF-balance", address] : null,
+        ([, targetAddress]) => getLeapETFBalance(targetAddress)
+    );
+
     const [selBalance, setSelBalance] = useState(LBTCBalance);
+
+    const [investBalance, setInvestBalance] = useState("0.000000");
+    const [redeemTokenOpen, setRedeemTokenOpen] = useState(false);
+    const [redeemToken, setRedeemToken] = useState<TokenName>("USDC");
+    const [redeemImg, setRedeemImage] = useState(USDCImage);
+    const [redeemDel, setRedeemDel] = useState("USD Coin");
+    const [redeemAmount, setRedeemAmount] = useState("");
+    const [redeemReceive, setRedeemReceive] = useState("0.000000");
+
+    async function handleQuote(recAmount: string) {
+        try {
+            const result = await getQuoteInvestWithToken(token, Number(recAmount) * 10 ** 18);
+            setInvestBalance(result.amount);
+        } catch (err) {
+            console.error(err);
+            setInvestBalance("0.000000");
+        }
+    }
+
+    async function handleRedeemQuote(burnAmount: string) {
+        try {
+            const result = await getQuoteRedeemToToken(redeemToken, Number(burnAmount) * 10 ** 18);
+            setRedeemReceive(result.amount);
+        } catch (err) {
+            console.error(err);
+            setRedeemReceive("0.000000");
+        }
+    }
 
     if (!address) {
         return <ToConnect />;
@@ -97,15 +133,16 @@ export default function RewardsPage() {
                                 </div>
                                 {tokenOpen ? (
                                     <div className="shadow bg-[var(--background)] absolute left-0 right-0 mt-4 rounded-lg border border-gray/10  shadow">
-                                        {[{ name: "LBTC", img: LBTCImage, del: "Wrapped Bitcoin", sel: LBTCBalance },
-                                        { name: "LETH", img: LETHImage, del: "Wrapped Ether", sel: LETHBalance },
-                                        { name: "LINK", img: LINKImage, del: "Chainlink", sel: LINKBalance },
-                                        { name: "USDC", img: USDCImage, del: "USD Coin", sel: USDCBalance }].map((item) => (
-                                            <div className="flex pl-5">
+                                        {([
+                                            { name: "LBTC", img: LBTCImage, del: "Wrapped Bitcoin", sel: LBTCBalance },
+                                            { name: "LETH", img: LETHImage, del: "Wrapped Ether", sel: LETHBalance },
+                                            { name: "LINK", img: LINKImage, del: "Chainlink", sel: LINKBalance },
+                                            { name: "USDC", img: USDCImage, del: "USD Coin", sel: USDCBalance },
+                                        ] as const).map((item) => (
+                                            <div key={item.name} className="flex pl-5">
                                                 <Image src={item.img} alt="LETH" width={20} height={20} priority />
 
                                                 <button
-                                                    key={item.name}
                                                     type="button"
                                                     className={
                                                         "w-full px-4 py-2 text-left " +
@@ -116,6 +153,8 @@ export default function RewardsPage() {
                                                         setImage(item.img);
                                                         setDel(item.del);
                                                         setSelBalance(item.sel)
+                                                        setAmount("");
+                                                        setInvestBalance("");
                                                         setTokenOpen(false);
 
                                                     }}
@@ -150,7 +189,12 @@ export default function RewardsPage() {
                                         value={amount}
                                         onChange={(e) => {
                                             setAmount(e.target.value);
-                                            console.log("call quoter function");
+                                            console.log("e.target.value: ", e.target.value);
+                                            if (e.target.value == "") {
+                                                setInvestBalance("");
+                                            }
+                                            handleQuote(e.target.value);
+                                            console.log(investBalance)
                                         }}
                                         className="bg-blue-300/10 border border-gray/10 rounded-lg h-9 w-full text-right text-2xl placeholder:text-slate-400 focus:outline-none pr-5"
                                     />
@@ -172,7 +216,7 @@ export default function RewardsPage() {
                                     >
                                         Max
                                     </div> */}
-                                    <div className="ml-auto text-right mr-6 text-xl ">0.000000</div>
+                                    <div className="ml-auto text-right mr-6 text-xl ">{investBalance ? Number(investBalance).toFixed(6) : "0.00"}</div>
                                 </div>
                                 <div className="flex justify-center w-full">
                                     <div className="border w-24/25 border-gray/10 mt-4"></div>
@@ -188,8 +232,116 @@ export default function RewardsPage() {
                         </div>
 
                     ) : (
-                        <div className="mt-10">
-                            <h1 className="text-3xl font-bold mb-4">Redeem</h1>
+                        <div>
+                            <div className="mt-4 flex">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-wallet-cards h-6 w-6 text-blue-500">
+                                    <rect width="18" height="14" x="3" y="5" rx="2"></rect>
+                                    <path d="M21 12h-7"></path>
+                                    <path d="M7 12h.01"></path>
+                                </svg>
+                                <p className="pl-3">Select Receive Token</p>
+                                <div className="ml-auto text-right mr-5">
+                                    ETF Balance: {ETFBalance ? Number(ETFBalance).toFixed(4) : "0.0000"}
+                                </div>
+                            </div>
+                            <div className="mt-4 relative">
+                                <div
+                                    className="flex w-full rounded-lg border border-gray/10 px-4 py-3 text-left text-blue-600"
+                                    onClick={() => setRedeemTokenOpen((prev) => !prev)}>
+                                    <Image src={redeemImg} alt="redeem token" width={20} height={20} priority className="mr-3" />
+                                    <div>{redeemToken}</div>
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevron-down h-4 w-4 opacity-50 ml-auto text-right mt-1" >
+                                        <path d="m6 9 6 6 6-6"></path>
+                                    </svg>
+                                </div>
+                                {redeemTokenOpen ? (
+                                    <div className="shadow bg-[var(--background)] absolute left-0 right-0 mt-4 rounded-lg border border-gray/10  shadow">
+                                        {([
+                                            { name: "LBTC", img: LBTCImage, del: "Wrapped Bitcoin" },
+                                            { name: "LETH", img: LETHImage, del: "Wrapped Ether" },
+                                            { name: "LINK", img: LINKImage, del: "Chainlink" },
+                                            { name: "USDC", img: USDCImage, del: "USD Coin" },
+                                        ] as const).map((item) => (
+                                            <div key={item.name} className="flex pl-5">
+                                                <Image src={item.img} alt={item.name} width={20} height={20} priority />
+
+                                                <button
+                                                    type="button"
+                                                    className={
+                                                        "w-full px-4 py-2 text-left " +
+                                                        (redeemToken === item.name ? "text-blue-600" : "text-slate-700")
+                                                    }
+                                                    onClick={() => {
+                                                        setRedeemToken(item.name);
+                                                        setRedeemImage(item.img);
+                                                        setRedeemDel(item.del);
+                                                        setRedeemAmount("");
+                                                        setRedeemReceive("");
+                                                        setRedeemTokenOpen(false);
+                                                    }}
+                                                >
+                                                    {item.name}
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <div className="mt-4 rounded-lg border border-gray/10 h-40">
+                                <div className="flex m-4 ">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-flame h-4 w-4 text-blue-500">
+                                        <path d="M8.5 14.5A2.5 2.5 0 0 0 11 17a2.5 2.5 0 0 0 2.5-2.5c0-1.38-2.5-5.5-2.5-5.5s-2.5 4.12-2.5 5.5Z"></path>
+                                        <path d="M12 7c.3-1.31 1.2-2.4 2.5-3.2 1.1 2 1.3 4.3.6 6.5"></path>
+                                    </svg>
+                                    <div className="flex-1 ml-2 -mt-1">ETF to Burn</div>
+                                </div>
+                                <div className="flex items-center">
+                                    <Image className="ml-4" src={ETFImage} alt="ETF" width={40} height={40} priority />
+                                    <div className="text-medium ml-4 ">ETF</div>
+                                    <div className="ml-auto text-right mr-6 text-xl ">Enter the number of ETF you want to redeem</div>
+                                </div>
+                                <div className="mt-4 px-4">
+                                    <input
+                                        type="text"
+                                        placeholder="0.0"
+                                        value={redeemAmount}
+                                        onChange={(e) => {
+                                            setRedeemAmount(e.target.value);
+                                            if (e.target.value === "") {
+                                                setRedeemReceive("");
+                                                return;
+                                            }
+                                            handleRedeemQuote(e.target.value);
+                                        }}
+                                        className="bg-blue-300/10 border border-gray/10 rounded-lg h-9 w-full text-right text-2xl placeholder:text-slate-400 focus:outline-none pr-5"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="mt-4 rounded-lg border border-gray/10 h-40 flex flex-col">
+                                <div className="m-4">Amount to Receive</div>
+                                <div className="flex">
+                                    <Image className="ml-4" src={redeemImg} alt={redeemToken} width={40} height={40} priority />
+                                    <div className="flex flex-col pl-5">
+                                        <div className="font-medium">{redeemToken}</div>
+                                        <div className="text-sm text-muted-foreground">{redeemDel}</div>
+                                    </div>
+                                    <div className="ml-auto text-right mr-6 text-xl ">
+                                        {redeemReceive ? Number(redeemReceive).toFixed(6) : "0.00"}
+                                    </div>
+                                </div>
+                                <div className="flex justify-center w-full">
+                                    <div className="border w-24/25 border-gray/10 mt-4"></div>
+                                </div>
+                                <div className="flex justify-between m-3">
+                                    <div>Estimated Output:</div>
+                                    <div>Quotes may change based on pool liquidity.</div>
+                                </div>
+                            </div>
+                            <button className="mt-4 h-13 w-full bg-blue-500 text-white rounded-lg font-lg">
+                                Redeem Now
+                            </button>
                         </div>
                     )}
                 </div>
